@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import torch.nn as nn
-from mmdet.models.necks.fpn import FPN
+from bench2driveMMCV.models.necks.fpn import FPN
 
 from .grid_mask import GridMask
 import timm
@@ -25,7 +25,7 @@ class ImgEncoder(nn.Module):
         self.grid_mask = GridMask( True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.use_grid_mask = True
 
-        self.img_backbone = timm.create_model( "resnet34", pretrained=True, features_only=True )
+        self.img_backbone = timm.create_model( "resnet34", pretrained=False, features_only=True )
 
         self.with_img_neck=True
 

@@ -2,7 +2,10 @@
 import numba
 import numpy as np
 import warnings
-from numba.errors import NumbaPerformanceWarning
+try:
+    from numba.errors import NumbaPerformanceWarning
+except ModuleNotFoundError:
+    from numba.core.errors import NumbaPerformanceWarning
 
 from bench2driveMMCV.core.bbox import box_np_ops
 

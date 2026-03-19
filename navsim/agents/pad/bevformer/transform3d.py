@@ -1,7 +1,7 @@
 import numpy as np
 from numpy import random
-import mmcv
-from mmcv.parallel import DataContainer as DC
+from bench2driveMMCV import bgr2hsv, hsv2bgr, imnormalize, impad, impad_to_multiple, imresize
+from bench2driveMMCV.parallel import DataContainer as DC
 
 class CustomObjectNameFilter(object):
     """Filter GT objects by their names, , and also filter corresponding fut trajs
@@ -62,10 +62,10 @@ class PadMultiViewImage(object):
     def _pad_img(self, results):
         """Pad images according to ``self.size``."""
         if self.size is not None:
-            padded_img = [mmcv.impad(
+            padded_img = [impad(
                 img, shape=self.size, pad_val=self.pad_val) for img in results['img']]
         elif self.size_divisor is not None:
-            padded_img = [mmcv.impad_to_multiple(
+            padded_img = [impad_to_multiple(
                 img, self.size_divisor, pad_val=self.pad_val) for img in results['img']]
 
         results['ori_shape'] = [img.shape for img in results['img']]
@@ -117,7 +117,7 @@ class NormalizeMultiviewImage(object):
                 result dict.
         """
 
-        results['img'] = [mmcv.imnormalize(img, self.mean, self.std, self.to_rgb) for img in results['img']]
+        results['img'] = [imnormalize(img, self.mean, self.std, self.to_rgb) for img in results['img']]
         results['img_norm_cfg'] = dict(
             mean=self.mean, std=self.std, to_rgb=self.to_rgb)
         return results
@@ -186,7 +186,7 @@ class PhotoMetricDistortionMultiViewImage:
                     img *= alpha
 
             # convert color from BGR to HSV
-            img = mmcv.bgr2hsv(img)
+            img = bgr2hsv(img)
 
             # random saturation
             if random.randint(2):
@@ -200,7 +200,7 @@ class PhotoMetricDistortionMultiViewImage:
                 img[..., 0][img[..., 0] < 0] += 360
 
             # convert color from HSV to BGR
-            img = mmcv.hsv2bgr(img)
+            img = hsv2bgr(img)
 
             # random contrast
             if mode == 0:
@@ -338,7 +338,7 @@ class RandomScaleImageMultiViewImage(object):
         scale_factor = np.eye(4)
         scale_factor[0, 0] *= rand_scale
         scale_factor[1, 1] *= rand_scale
-        results['img'] = [mmcv.imresize(img, (x_size[idx], y_size[idx]), return_scale=False) for idx, img in
+        results['img'] = [imresize(img, (x_size[idx], y_size[idx]), return_scale=False) for idx, img in
                           enumerate(results['img'])]
         lidar2img = [scale_factor @ l2i for l2i in results['lidar2img']]
         results['lidar2img'] = lidar2img

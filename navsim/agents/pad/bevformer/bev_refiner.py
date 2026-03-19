@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .encoder import BEVFormerEncoder
-from mmdet.models.utils.positional_encoding import LearnedPositionalEncoding
+from bench2driveMMCV.models.utils import LearnedPositionalEncoding
 from .decoder import CustomMSDeformableAttention
 from .temporal_self_attention import TemporalSelfAttention
 from .spatial_cross_attention import MSDeformableAttention3D

@@ -1,20 +1,20 @@
 from .custom_base_transformer_layer import MyCustomBaseTransformerLayer
 import copy
 import warnings
-from mmcv.cnn.bricks.registry import (ATTENTION,
-                                      TRANSFORMER_LAYER,
-                                      TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import TransformerLayerSequence
-from mmcv.runner import force_fp32, auto_fp16
+from bench2driveMMCV.models.bricks.registry import (ATTENTION,
+                                                    TRANSFORMER_LAYER,
+                                                    TRANSFORMER_LAYER_SEQUENCE)
+from bench2driveMMCV.models.bricks.transformer import TransformerLayerSequence
+from bench2driveMMCV.utils import force_fp32, auto_fp16
 import numpy as np
 import torch
-from mmcv.utils import TORCH_VERSION, digit_version
-from mmcv.utils import ext_loader
+from bench2driveMMCV.utils import TORCH_VERSION, digit_version
+from bench2driveMMCV.utils import ext_loader
 ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
 import torch.nn as nn
 
-@TRANSFORMER_LAYER_SEQUENCE.register_module()
+@TRANSFORMER_LAYER_SEQUENCE.register_module(force=True)
 class BEVFormerEncoder(TransformerLayerSequence):
 
     """
@@ -301,7 +301,7 @@ class BEVFormerEncoder(TransformerLayerSequence):
         return output
 
 
-@TRANSFORMER_LAYER.register_module()
+@TRANSFORMER_LAYER.register_module(force=True)
 class BEVFormerLayer(MyCustomBaseTransformerLayer):
     """Implements decoder layer in DETR transformer.
     Args:

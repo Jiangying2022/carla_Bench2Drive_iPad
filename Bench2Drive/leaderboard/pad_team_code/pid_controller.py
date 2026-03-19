@@ -92,7 +92,12 @@ class PIDController(object):
         steer = self.turn_controller.step(angle_final)
         steer = np.clip(steer, -1.0, 1.0)
 
-        brake = desired_speed < self.brake_speed or (speed / desired_speed) > self.brake_ratio
+        speed_value = float(speed.astype(np.float64))
+        desired_speed_value = float(desired_speed.astype(np.float64))
+        speed_ratio = float('inf') if desired_speed_value <= 1e-6 else speed_value / desired_speed_value
+        brake_by_speed = desired_speed_value < self.brake_speed
+        brake_by_ratio = speed_ratio > self.brake_ratio
+        brake = brake_by_speed or brake_by_ratio
 
         delta = np.clip(desired_speed - speed, 0.0, self.clip_delta)
         throttle = self.speed_controller.step(delta)
@@ -110,12 +115,15 @@ class PIDController(object):
             'wp_1': tuple(waypoints[0].astype(np.float64)),
             'aim': tuple(aim.astype(np.float64)),
             'target': tuple(target.astype(np.float64)),
-            'desired_speed': float(desired_speed.astype(np.float64)),
+            'desired_speed': desired_speed_value,
             'angle': float(angle.astype(np.float64)),
             'angle_last': float(angle_last.astype(np.float64)),
             'angle_target': float(angle_target.astype(np.float64)),
             'angle_final': float(angle_final.astype(np.float64)),
             'delta': float(delta.astype(np.float64)),
+            'speed_ratio': float(speed_ratio),
+            'brake_by_speed': bool(brake_by_speed),
+            'brake_by_ratio': bool(brake_by_ratio),
         }
 
         return steer, throttle, brake, metadata

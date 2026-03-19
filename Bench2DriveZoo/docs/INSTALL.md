@@ -45,13 +45,13 @@
     ## Ignore the line about downloading and extracting CARLA if you have already done so.
     mkdir carla
     cd carla
-    wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_0.9.15.tar.gz
-    tar -xvf CARLA_0.9.15.tar.gz
-    cd Import && wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/AdditionalMaps_0.9.15.tar.gz
+    wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/CARLA_0.9.16.tar.gz
+    tar -xvf CARLA_0.9.16.tar.gz
+    cd Import && wget https://carla-releases.s3.us-east-005.backblazeb2.com/Linux/AdditionalMaps_0.9.16.tar.gz
     cd .. && bash ImportAssets.sh
     export CARLA_ROOT=YOUR_CARLA_PATH
 
     ## Important!!! Otherwise, the python environment can not find carla package
-    echo "$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg" >> YOUR_CONDA_PATH/envs/YOUR_CONDA_ENV_NAME/lib/python3.8/site-packages/carla.pth # python 3.8 also works well, please set YOUR_CONDA_PATH and YOUR_CONDA_ENV_NAME
+    echo "$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.16-py3.7-linux-x86_64.egg" >> YOUR_CONDA_PATH/envs/YOUR_CONDA_ENV_NAME/lib/python3.8/site-packages/carla.pth # python 3.8 also works well, please set YOUR_CONDA_PATH and YOUR_CONDA_ENV_NAME
 
     ```

@@ -1,16 +1,26 @@
 import json
-import carla
 import argparse
 import xml.etree.ElementTree as ET
 import sys
 import os
+import glob
 
 CARLA_ROOT=os.environ.get("CARLA_ROOT")
 
 sys.path.append(CARLA_ROOT + "/PythonAPI")
 sys.path.append(CARLA_ROOT + "/PythonAPI/carla")
 
-sys.path.append(CARLA_ROOT + "/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg")
+carla_egg_paths = sorted(glob.glob(CARLA_ROOT + "/PythonAPI/carla/dist/carla-0.9.16-*.egg"))
+if not carla_egg_paths:
+    carla_egg_paths = sorted(glob.glob(CARLA_ROOT + "/PythonAPI/carla/dist/carla-*.egg"))
+carla_whl_paths = sorted(glob.glob(CARLA_ROOT + "/PythonAPI/carla/dist/carla-0.9.16-*.whl"))
+if not carla_whl_paths:
+    carla_whl_paths = sorted(glob.glob(CARLA_ROOT + "/PythonAPI/carla/dist/carla-*.whl"))
+carla_pkg_paths = carla_egg_paths if carla_egg_paths else carla_whl_paths
+if carla_pkg_paths:
+    sys.path.append(carla_pkg_paths[-1])
+
+import carla
 
 
 from agents.navigation.global_route_planner import GlobalRoutePlanner

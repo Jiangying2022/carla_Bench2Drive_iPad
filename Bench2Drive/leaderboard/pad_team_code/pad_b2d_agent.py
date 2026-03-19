@@ -15,7 +15,10 @@ import numpy as np
 from PIL import Image
 from torchvision import transforms as T
 from pad_team_code.pid_controller import PIDController
-from team_code.planner import RoutePlanner
+try:
+    from team_code.planner import RoutePlanner
+except ModuleNotFoundError:
+    from Bench2DriveZoo.team_code.planner import RoutePlanner
 from leaderboard.autoagents import autonomous_agent
 from bench2driveMMCV import Config
 from bench2driveMMCV.datasets.pipelines import Compose
@@ -44,6 +47,7 @@ class padAgent(autonomous_agent.AutonomousAgent):
         self.pidcontroller = PIDController()
         self.config_path = path_to_conf_file.split('+')[0]
         self.ckpt_path = path_to_conf_file.split('+')[1]
+        self.standalone_mode = path_to_conf_file.split('+')[-1] == 'standalone'
         if IS_BENCH2DRIVE:
             self.save_name = path_to_conf_file.split('+')[-1]
         else:
@@ -51,6 +55,8 @@ class padAgent(autonomous_agent.AutonomousAgent):
         self.step = -1
         self.wall_start = time.time()
         self.initialized = False
+        self.latest_front_image = None
+        self.latest_hud = {}
         cfg = Config.fromfile(self.config_path)
         if hasattr(cfg, 'plugin'):
             if cfg.plugin:
@@ -196,28 +202,33 @@ class padAgent(autonomous_agent.AutonomousAgent):
             self.lidar2img[key] = scale_factor @ l2i
 
     def _init(self):
-        try:
-            locx, locy = self._global_plan_world_coord[0][0].location.x, self._global_plan_world_coord[0][0].location.y
-            lon, lat = self._global_plan[0][0]['lon'], self._global_plan[0][0]['lat']
-            EARTH_RADIUS_EQUA = 6378137.0
-
-            def equations(vars):
-                x, y = vars
-                eq1 = lon * math.cos(x * math.pi / 180) - (locx * x * 180) / (math.pi * EARTH_RADIUS_EQUA) - math.cos(
-                    x * math.pi / 180) * y
-                eq2 = math.log(math.tan((lat + 90) * math.pi / 360)) * EARTH_RADIUS_EQUA * math.cos(
-                    x * math.pi / 180) + locy - math.cos(x * math.pi / 180) * EARTH_RADIUS_EQUA * math.log(
-                    math.tan((90 + x) * math.pi / 360))
-                return [eq1, eq2]
-
-            initial_guess = [0, 0]
-            solution = fsolve(equations, initial_guess)
-            self.lat_ref, self.lon_ref = solution[0], solution[1]
-        except Exception as e:
-            print(e, flush=True)
+        if self.standalone_mode:
             self.lat_ref, self.lon_ref = 0, 0
-        self._route_planner = RoutePlanner(4.0, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
-        self._route_planner.set_route(self._global_plan, True)
+            self._route_planner = RoutePlanner(4.0, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
+            self._route_planner.set_route(self._global_plan_world_coord, False)
+        else:
+            try:
+                locx, locy = self._global_plan_world_coord[0][0].location.x, self._global_plan_world_coord[0][0].location.y
+                lon, lat = self._global_plan[0][0]['lon'], self._global_plan[0][0]['lat']
+                EARTH_RADIUS_EQUA = 6378137.0
+
+                def equations(vars):
+                    x, y = vars
+                    eq1 = lon * math.cos(x * math.pi / 180) - (locx * x * 180) / (math.pi * EARTH_RADIUS_EQUA) - math.cos(
+                        x * math.pi / 180) * y
+                    eq2 = math.log(math.tan((lat + 90) * math.pi / 360)) * EARTH_RADIUS_EQUA * math.cos(
+                        x * math.pi / 180) + locy - math.cos(x * math.pi / 180) * EARTH_RADIUS_EQUA * math.log(
+                        math.tan((90 + x) * math.pi / 360))
+                    return [eq1, eq2]
+
+                initial_guess = [0, 0]
+                solution = fsolve(equations, initial_guess)
+                self.lat_ref, self.lon_ref = solution[0], solution[1]
+            except Exception as e:
+                print(e, flush=True)
+                self.lat_ref, self.lon_ref = 0, 0
+            self._route_planner = RoutePlanner(4.0, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
+            self._route_planner.set_route(self._global_plan, True)
         self.initialized = True
         self.metric_info = {}
 
@@ -318,9 +329,24 @@ class padAgent(autonomous_agent.AutonomousAgent):
         compass = input_data['IMU'][1][-1]
         acceleration = input_data['IMU'][1][:3]
         angular_velocity = input_data['IMU'][1][3:6]
-
-        pos = self.gps_to_location(gps)
+        hero_location = None
+        if self.hero_actor is not None and self.hero_actor.is_alive:
+            hero_transform = self.hero_actor.get_transform()
+            hero_location = np.array([hero_transform.location.x, hero_transform.location.y])
+        if self.standalone_mode and hero_location is not None:
+            pos = hero_location
+        else:
+            pos = self.gps_to_location(gps)
         near_node, near_command = self._route_planner.run_step(pos)
+        self.nav_debug = {
+            'gps': gps.tolist(),
+            'gps_to_location': pos.tolist(),
+            'hero_location': hero_location.tolist() if hero_location is not None else None,
+            'near_node': near_node.tolist() if hasattr(near_node, 'tolist') else list(near_node),
+            'near_command': int(getattr(near_command, 'value', near_command)),
+            'route_len': len(self._route_planner.route),
+        }
+        self.latest_front_image = imgs['CAM_FRONT'].copy()
 
         if (math.isnan(compass) == True):  # It can happen that the compass sends nan for a few frames
             compass = 0.0
@@ -431,6 +457,7 @@ class padAgent(autonomous_agent.AutonomousAgent):
         rotation_matrix = np.array(
             [[np.cos(theta_to_lidar), -np.sin(theta_to_lidar)], [np.sin(theta_to_lidar), np.cos(theta_to_lidar)]])
         local_command_xy = rotation_matrix @ command_near_xy
+        self.nav_debug['local_command_xy'] = local_command_xy.tolist()
 
         ego2world = np.eye(4)
         ego2world[0:3, 0:3] = Quaternion(axis=[0, 0, 1], radians=ego_theta).rotation_matrix
@@ -481,6 +508,19 @@ class padAgent(autonomous_agent.AutonomousAgent):
         self.pid_metadata['brake_traj'] = float(brake_traj)
         self.pid_metadata['plan'] = out_truck.tolist()
         self.pid_metadata['command'] = command
+        self.latest_hud = {
+            'command': int(command),
+            'command_raw': int(tick_data['command_near']),
+            'local_command_xy': local_command_xy.tolist(),
+            'predicted_traj': out_truck.tolist(),
+            'speed': float(tick_data['speed']),
+            'steer': float(control.steer),
+            'throttle': float(control.throttle),
+            'brake': float(control.brake),
+            'desired_speed': float(self.pid_metadata.get('desired_speed', 0.0)),
+            'near_node': self.nav_debug.get('near_node'),
+            'route_len': self.nav_debug.get('route_len'),
+        }
         #self.pid_metadata['all_plan'] = all_out_truck.tolist()
 
         metric_info = self.get_metric_info()

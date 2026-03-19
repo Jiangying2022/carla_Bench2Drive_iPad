@@ -1,5 +1,4 @@
-from mmcv.ops.multi_scale_deform_attn import multi_scale_deformable_attn_pytorch
-import mmcv
+from bench2driveMMCV.ops.multi_scale_deform_attn import multi_scale_deformable_attn_pytorch
 import cv2 as cv
 import copy
 import warnings
@@ -8,16 +7,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import xavier_init, constant_init
-from mmcv.cnn.bricks.registry import (ATTENTION,
-                                      TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import TransformerLayerSequence
+from bench2driveMMCV.models.utils.weight_init import xavier_init, constant_init
+from bench2driveMMCV.models.bricks.registry import (ATTENTION,
+                                                    TRANSFORMER_LAYER_SEQUENCE)
+from bench2driveMMCV.models.bricks.transformer import TransformerLayerSequence
 import math
-from mmcv.runner.base_module import BaseModule, ModuleList, Sequential
-from mmcv.utils import (ConfigDict, build_from_cfg, deprecated_api_warning,
-                        to_2tuple)
+from bench2driveMMCV.models.backbones.base_module import BaseModule, ModuleList, Sequential
+from bench2driveMMCV.utils import (ConfigDict, build_from_cfg, deprecated_api_warning,
+                                   to_2tuple)
 
-from mmcv.utils import ext_loader
+from bench2driveMMCV.utils import ext_loader
 from .multi_scale_deformable_attn_function import MultiScaleDeformableAttnFunction_fp32, \
     MultiScaleDeformableAttnFunction_fp16
 
@@ -43,7 +42,7 @@ def inverse_sigmoid(x, eps=1e-5):
     return torch.log(x1 / x2)
 
 
-@TRANSFORMER_LAYER_SEQUENCE.register_module()
+@TRANSFORMER_LAYER_SEQUENCE.register_module(force=True)
 class DetectionTransformerDecoder(TransformerLayerSequence):
     """Implements the decoder in DETR3D transformer.
     Args:
@@ -123,7 +122,7 @@ class DetectionTransformerDecoder(TransformerLayerSequence):
         return output, reference_points
 
 
-@ATTENTION.register_module()
+@ATTENTION.register_module(force=True)
 class CustomMSDeformableAttention(BaseModule):
     """An attention module used in Deformable-Detr.
 

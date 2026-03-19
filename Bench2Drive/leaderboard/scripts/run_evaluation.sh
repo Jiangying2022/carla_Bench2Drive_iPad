@@ -4,7 +4,19 @@
 export CARLA_SERVER=${CARLA_ROOT}/CarlaUE4.sh
 export PYTHONPATH=$PYTHONPATH:${CARLA_ROOT}/PythonAPI
 export PYTHONPATH=$PYTHONPATH:${CARLA_ROOT}/PythonAPI/carla
-export PYTHONPATH=$PYTHONPATH:$CARLA_ROOT/PythonAPI/carla/dist/carla-0.9.15-py3.7-linux-x86_64.egg
+CARLA_EGG=$(ls -1 ${CARLA_ROOT}/PythonAPI/carla/dist/carla-0.9.16-*.egg 2>/dev/null | tail -n 1)
+if [ -z "$CARLA_EGG" ]; then
+    CARLA_EGG=$(ls -1 ${CARLA_ROOT}/PythonAPI/carla/dist/carla-*.egg 2>/dev/null | tail -n 1)
+fi
+CARLA_WHL=$(ls -1 ${CARLA_ROOT}/PythonAPI/carla/dist/carla-0.9.16-*.whl 2>/dev/null | tail -n 1)
+if [ -z "$CARLA_WHL" ]; then
+    CARLA_WHL=$(ls -1 ${CARLA_ROOT}/PythonAPI/carla/dist/carla-*.whl 2>/dev/null | tail -n 1)
+fi
+if [ -n "$CARLA_EGG" ]; then
+    export PYTHONPATH=$PYTHONPATH:$CARLA_EGG
+elif [ -n "$CARLA_WHL" ]; then
+    export PYTHONPATH=$PYTHONPATH:$CARLA_WHL
+fi
 export PYTHONPATH=$PYTHONPATH:leaderboard
 export PYTHONPATH=$PYTHONPATH:leaderboard/team_code
 export PYTHONPATH=$PYTHONPATH:scenario_runner

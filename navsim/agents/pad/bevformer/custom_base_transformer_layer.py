@@ -3,16 +3,18 @@ import warnings
 
 import torch
 
-from mmcv import ConfigDict, deprecated_api_warning
-from mmcv.cnn import Linear, build_activation_layer, build_norm_layer
-from mmcv.runner.base_module import BaseModule, ModuleList, Sequential
+from bench2driveMMCV import ConfigDict, deprecated_api_warning
+from bench2driveMMCV.models.bricks.wrappers import Linear
+from bench2driveMMCV.models.bricks.activation import build_activation_layer
+from bench2driveMMCV.models.bricks.norm import build_norm_layer
+from bench2driveMMCV.models.backbones.base_module import BaseModule, ModuleList, Sequential
 
-from mmcv.cnn.bricks.registry import (ATTENTION, FEEDFORWARD_NETWORK, POSITIONAL_ENCODING,
-                                      TRANSFORMER_LAYER, TRANSFORMER_LAYER_SEQUENCE)
+from bench2driveMMCV.models.bricks.registry import (ATTENTION, FEEDFORWARD_NETWORK, POSITIONAL_ENCODING,
+                                                    TRANSFORMER_LAYER, TRANSFORMER_LAYER_SEQUENCE)
 
 # Avoid BC-breaking of importing MultiScaleDeformableAttention from this file
 try:
-    from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention  # noqa F401
+    from bench2driveMMCV.ops.multi_scale_deform_attn import MultiScaleDeformableAttention  # noqa F401
     warnings.warn(
         ImportWarning(
             '``MultiScaleDeformableAttention`` has been moved to '
@@ -24,10 +26,10 @@ except ImportError:
     warnings.warn('Fail to import ``MultiScaleDeformableAttention`` from '
                   '``mmcv.ops.multi_scale_deform_attn``, '
                   'You should install ``mmcv-full`` if you need this module. ')
-from mmcv.cnn.bricks.transformer import build_feedforward_network, build_attention
+from bench2driveMMCV.models.bricks.transformer import build_feedforward_network, build_attention
 
 
-@TRANSFORMER_LAYER.register_module()
+@TRANSFORMER_LAYER.register_module(force=True)
 class MyCustomBaseTransformerLayer(BaseModule):
     """Base `TransformerLayer` for vision transformer.
     It can be built from `mmcv.ConfigDict` and support more flexible
