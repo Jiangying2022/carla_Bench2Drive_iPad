@@ -33,6 +33,25 @@ SAVE_PATH = os.environ.get('SAVE_PATH', None)
 IS_BENCH2DRIVE = os.environ.get('IS_BENCH2DRIVE', None)
 TEAM_AGENT=os.environ.get("TEAM_AGENT",None)
 
+RAW_COMMAND_NAMES = {
+    -1: 'VOID',
+    1: 'LEFT',
+    2: 'RIGHT',
+    3: 'STRAIGHT',
+    4: 'LANEFOLLOW',
+    5: 'CHANGELANELEFT',
+    6: 'CHANGELANERIGHT',
+}
+
+MODEL_COMMAND_NAMES = {
+    0: 'LEFT',
+    1: 'RIGHT',
+    2: 'STRAIGHT',
+    3: 'LANEFOLLOW',
+    4: 'CHANGELANELEFT',
+    5: 'CHANGELANERIGHT',
+}
+
 def get_entry_point():
     return 'padAgent'
 
@@ -98,6 +117,8 @@ class padAgent(autonomous_agent.AutonomousAgent):
         control.brake = 0.0
         self.prev_control = control
         self.prev_control_cache = []
+        self._global_plan_dense = None
+        self._global_plan_world_coord_dense = None
         if SAVE_PATH is not None:
             now = datetime.datetime.now()
             string = pathlib.Path(os.environ['ROUTES']).stem + '_'
@@ -201,11 +222,17 @@ class padAgent(autonomous_agent.AutonomousAgent):
 
             self.lidar2img[key] = scale_factor @ l2i
 
+    def set_global_plan(self, global_plan_gps, global_plan_world_coord):
+        self._global_plan_dense = list(global_plan_gps)
+        self._global_plan_world_coord_dense = list(global_plan_world_coord)
+        super().set_global_plan(global_plan_gps, global_plan_world_coord)
+
     def _init(self):
         if self.standalone_mode:
             self.lat_ref, self.lon_ref = 0, 0
             self._route_planner = RoutePlanner(4.0, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
-            self._route_planner.set_route(self._global_plan_world_coord, False)
+            route_world = self._global_plan_world_coord_dense if self._global_plan_world_coord_dense is not None else self._global_plan_world_coord
+            self._route_planner.set_route(route_world, False)
         else:
             try:
                 locx, locy = self._global_plan_world_coord[0][0].location.x, self._global_plan_world_coord[0][0].location.y
@@ -338,12 +365,14 @@ class padAgent(autonomous_agent.AutonomousAgent):
         else:
             pos = self.gps_to_location(gps)
         near_node, near_command = self._route_planner.run_step(pos)
+        near_command_value = int(getattr(near_command, 'value', near_command))
         self.nav_debug = {
             'gps': gps.tolist(),
             'gps_to_location': pos.tolist(),
             'hero_location': hero_location.tolist() if hero_location is not None else None,
             'near_node': near_node.tolist() if hasattr(near_node, 'tolist') else list(near_node),
-            'near_command': int(getattr(near_command, 'value', near_command)),
+            'near_command': near_command_value,
+            'near_command_name': RAW_COMMAND_NAMES.get(near_command_value, f'UNKNOWN({near_command_value})'),
             'route_len': len(self._route_planner.route),
         }
         self.latest_front_image = imgs['CAM_FRONT'].copy()
@@ -447,6 +476,7 @@ class padAgent(autonomous_agent.AutonomousAgent):
         if command < 0:
             command = 4
         command -= 1
+        model_command_name = MODEL_COMMAND_NAMES.get(int(command), f'UNKNOWN({int(command)})')
         results['command'] = command
         command_onehot = np.zeros(6)
         command_onehot[command] = 1
@@ -458,6 +488,12 @@ class padAgent(autonomous_agent.AutonomousAgent):
             [[np.cos(theta_to_lidar), -np.sin(theta_to_lidar)], [np.sin(theta_to_lidar), np.cos(theta_to_lidar)]])
         local_command_xy = rotation_matrix @ command_near_xy
         self.nav_debug['local_command_xy'] = local_command_xy.tolist()
+        self.nav_debug['model_command'] = int(command)
+        self.nav_debug['model_command_name'] = model_command_name
+        self.nav_debug['ego_theta'] = float(ego_theta)
+        self.nav_debug['ego_yaw_deg'] = float(ego_theta / np.pi * 180.0)
+        self.nav_debug['raw_theta'] = float(raw_theta)
+        self.nav_debug['command_near_distance'] = float(np.linalg.norm(command_near_xy))
 
         ego2world = np.eye(4)
         ego2world[0:3, 0:3] = Quaternion(axis=[0, 0, 1], radians=ego_theta).rotation_matrix
@@ -510,15 +546,20 @@ class padAgent(autonomous_agent.AutonomousAgent):
         self.pid_metadata['command'] = command
         self.latest_hud = {
             'command': int(command),
+            'command_name': model_command_name,
             'command_raw': int(tick_data['command_near']),
+            'command_raw_name': self.nav_debug.get('near_command_name'),
+            'command_onehot': command_onehot.tolist(),
             'local_command_xy': local_command_xy.tolist(),
             'predicted_traj': out_truck.tolist(),
             'speed': float(tick_data['speed']),
+            'acceleration_xy': tick_data['acceleration'][:2].tolist(),
             'steer': float(control.steer),
             'throttle': float(control.throttle),
             'brake': float(control.brake),
             'desired_speed': float(self.pid_metadata.get('desired_speed', 0.0)),
             'near_node': self.nav_debug.get('near_node'),
+            'near_command_name': self.nav_debug.get('near_command_name'),
             'route_len': self.nav_debug.get('route_len'),
         }
         #self.pid_metadata['all_plan'] = all_out_truck.tolist()

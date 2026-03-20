@@ -111,7 +111,10 @@ class PadAgent(AbstractAgent):
         return [PadFeatureBuilder(config=self._config)]
 
     def forward(self, features: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        return self._pad_model(features)
+        preds = self._pad_model(features)
+        print(f'trajectory: {preds["trajectory"]}')
+ 
+        return preds
 
     def compute_score(self, targets, proposals, test=True):
         if self.training:

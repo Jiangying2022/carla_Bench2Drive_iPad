@@ -17,6 +17,7 @@ import collections.abc
 import cv2
 import glob
 import logging
+import math
 import numpy as np
 import os
 import pygame
@@ -95,6 +96,73 @@ TRAJECTORY_COLOR = carla.Color(255, 64, 64)
 DESTINATION_COLOR = carla.Color(255, 255, 0)
 START_COLOR = carla.Color(0, 128, 255)
 NEAR_NODE_COLOR = carla.Color(200, 0, 255)
+
+
+def _heading_deg_between_locations(start: carla.Location, end: carla.Location):
+    dx = end.x - start.x
+    dy = end.y - start.y
+    if abs(dx) < 1e-6 and abs(dy) < 1e-6:
+        return None
+    return math.degrees(math.atan2(dy, dx))
+
+
+def _normalize_angle_deg(angle_deg: float) -> float:
+    return (angle_deg + 180.0) % 360.0 - 180.0
+
+
+def _local_command_angle_deg(local_command_xy):
+    if not local_command_xy or len(local_command_xy) < 2:
+        return None
+    x = float(local_command_xy[0])
+    y = float(local_command_xy[1])
+    if abs(x) < 1e-6 and abs(y) < 1e-6:
+        return None
+    return math.degrees(math.atan2(x, y))
+
+
+def _trajectory_path_length(predicted_traj):
+    if not predicted_traj:
+        return 0.0
+    length = 0.0
+    prev_x = 0.0
+    prev_y = 0.0
+    for point in predicted_traj:
+        x = float(point[0])
+        y = float(point[1])
+        length += math.hypot(x - prev_x, y - prev_y)
+        prev_x = x
+        prev_y = y
+    return length
+
+
+def _trajectory_terminal_heading_deg(predicted_traj):
+    if not predicted_traj:
+        return None
+    if len(predicted_traj) >= 2:
+        start = predicted_traj[-2]
+        end = predicted_traj[-1]
+        dx = float(end[0]) - float(start[0])
+        dy = float(end[1]) - float(start[1])
+        if abs(dx) >= 1e-6 or abs(dy) >= 1e-6:
+            return math.degrees(math.atan2(dx, dy))
+    end = predicted_traj[-1]
+    x = float(end[0])
+    y = float(end[1])
+    if abs(x) < 1e-6 and abs(y) < 1e-6:
+        return None
+    return math.degrees(math.atan2(x, y))
+
+
+def _format_sequence(values, precision=3):
+    if values is None:
+        return 'None'
+    formatted = []
+    for value in values:
+        if isinstance(value, (list, tuple)) and len(value) >= 2:
+            formatted.append(f'({float(value[0]):.{precision}f}, {float(value[1]):.{precision}f})')
+        else:
+            formatted.append(f'{float(value):.{precision}f}')
+    return '[' + ', '.join(formatted) + ']'
 
 
 # ==================== 交通流辅助函数 ====================
@@ -332,8 +400,8 @@ class ClosedLoopRunner:
         blueprint.set_attribute('sensor_tick', '0.0')
 
         camera_transform = carla.Transform(
-            carla.Location(x=-6.0, y=0.0, z=2.8),
-            carla.Rotation(pitch=-12.0, yaw=0.0, roll=0.0),
+            carla.Location(x=-self.args.record_camera_distance, y=0.0, z=self.args.record_camera_height),
+            carla.Rotation(pitch=self.args.record_camera_pitch, yaw=0.0, roll=0.0),
         )
         self.record_camera = self.world.spawn_actor(
             blueprint,
@@ -362,15 +430,68 @@ class ClosedLoopRunner:
         self.video_output_path = output_path
         LOG.info(f'录像已启用: {output_path}')
 
-    def _on_record_video_frame(self, image) -> None:
+    def _on_record_video_frame(self, image: carla.Image) -> None:
         array = np.frombuffer(image.raw_data, dtype=np.uint8)
         array = array.reshape((image.height, image.width, 4))
         self.record_latest_frame = array[:, :, :3].copy()
 
+    def _build_grouped_overlay_lines(self, hud):
+        predicted_traj = hud.get('predicted_traj') or []
+        overlay_lines = [
+            'INPUT:',
+            f'  speed: {hud.get("speed", 0.0):.3f}',
+            f'  acceleration_xy: {_format_sequence(hud.get("acceleration_xy") or [], precision=3)}',
+            f'  local_command_xy: {_format_sequence(hud.get("local_command_xy") or [], precision=3)}',
+            f'  command(raw/model): {hud.get("command_raw")} {hud.get("command_raw_name")} / {hud.get("command")} {hud.get("command_name")}',
+            f'  command_onehot: {_format_sequence(hud.get("command_onehot") or [], precision=0)}',
+            'OUTPUT:',
+            f'  trajectory_point_count: {len(predicted_traj)}',
+            'PID OUTPUT:',
+            f'  desired_speed: {hud.get("desired_speed", 0.0):.3f}',
+            f'  steer: {hud.get("steer", 0.0):.3f}',
+            f'  throttle: {hud.get("throttle", 0.0):.3f}',
+            f'  brake: {hud.get("brake", 0.0):.3f}',
+        ]
+        for idx, point in enumerate(predicted_traj):
+            overlay_lines.append(f'  p{idx}: ({float(point[0]):.3f}, {float(point[1]):.3f})')
+        overlay_lines.extend([
+            'DEBUG:',
+            f'  target_angle/pred_angle/gap: {hud.get("local_command_angle_deg")} / {hud.get("pred_terminal_heading_deg")} / {hud.get("target_pred_angle_gap_deg")}',
+            f'  pred_path_length: {hud.get("pred_path_length")}',
+            f'  route_len: {hud.get("route_len")}',
+            f'  near_node: {hud.get("near_node")}',
+            f'  ego_yaw/route_heading/error: {hud.get("ego_yaw_deg")} / {hud.get("route_heading_deg")} / {hud.get("heading_error_deg")}',
+            f'  near_node_distance: {hud.get("near_node_distance")}',
+            f'  traffic_light: {hud.get("traffic_light_state")}',
+        ])
+        return overlay_lines
+
+    def _draw_video_overlay(self, frame: np.ndarray, hud) -> np.ndarray:
+        if frame is None:
+            return frame
+        overlay_frame = frame.copy()
+        lines = self._build_grouped_overlay_lines(hud)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.55
+        thickness = 1
+        line_height = 22
+        margin_x = 18
+        margin_y = 28
+        y = margin_y
+        for line in lines:
+            if y > overlay_frame.shape[0] - 12:
+                break
+            cv2.putText(overlay_frame, line, (margin_x + 1, y + 1), font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+            cv2.putText(overlay_frame, line, (margin_x, y), font, font_scale, (240, 240, 240), thickness, cv2.LINE_AA)
+            y += line_height
+        return overlay_frame
+
     def _write_video_frame(self) -> None:
         if self.video_writer is None or self.record_latest_frame is None:
             return
-        self.video_writer.write(self.record_latest_frame)
+        hud = getattr(self.agent, 'latest_hud', {}) if self.agent is not None else {}
+        frame = self._draw_video_overlay(self.record_latest_frame, hud)
+        self.video_writer.write(frame)
 
     # ---------- 初始化 ----------
     def setup(self) -> None:
@@ -799,21 +920,7 @@ class ClosedLoopRunner:
                     radius = int(distance * scale)
                     pygame.draw.circle(self.hud_surface, (45, 45, 45), (int(center_x), int(center_y)), radius, 1)
 
-            lines = [
-                f'command(raw/model): {hud.get("command_raw")} / {hud.get("command")}',
-                f'local_command_xy: {hud.get("local_command_xy")}',
-                f'steer: {hud.get("steer", 0.0):.3f}',
-                f'throttle: {hud.get("throttle", 0.0):.3f}',
-                f'brake: {hud.get("brake", 0.0):.3f}',
-                f'speed: {hud.get("speed", 0.0):.3f}',
-                f'desired_speed: {hud.get("desired_speed", 0.0):.3f}',
-                f'route_len: {hud.get("route_len")}',
-                f'near_node: {hud.get("near_node")}',
-                'predicted_traj:',
-            ]
-            predicted_traj = hud.get('predicted_traj') or []
-            for idx, point in enumerate(predicted_traj[:8]):
-                lines.append(f'  p{idx}: ({point[0]:.2f}, {point[1]:.2f})')
+            lines = self._build_grouped_overlay_lines(hud)
             y = 30
             for line in lines:
                 text_surface = self.hud_font.render(line, True, (255, 255, 255))
@@ -847,33 +954,90 @@ class ClosedLoopRunner:
             self.hero.apply_control(control)
 
             if step % self.args.log_every == 0:
-                location = self.hero.get_transform().location
+                hero_transform = self.hero.get_transform()
+                location = hero_transform.location
                 velocity = self.hero.get_velocity()
                 speed = (velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2) ** 0.5
                 remaining = location.distance(self.destination_transform.location)
                 nav_debug = getattr(self.agent, 'nav_debug', {})
                 pid_debug = getattr(self.agent, 'pid_metadata', {})
+                hud_debug = getattr(self.agent, 'latest_hud', {})
                 future_points = [
                     (round(point.x, 2), round(point.y, 2))
                     for point in self._get_future_route_points(5)
                 ]
+                near_node = nav_debug.get('near_node')
+                near_node_distance = None
+                if near_node and len(near_node) >= 2:
+                    near_location = carla.Location(x=float(near_node[0]), y=float(near_node[1]), z=location.z)
+                    near_node_distance = round(location.distance(near_location), 3)
+                route_heading_deg = None
+                if len(future_points) >= 2:
+                    route_heading_deg = _heading_deg_between_locations(
+                        carla.Location(x=float(future_points[0][0]), y=float(future_points[0][1]), z=location.z),
+                        carla.Location(x=float(future_points[1][0]), y=float(future_points[1][1]), z=location.z),
+                    )
+                ego_yaw_deg = float(hero_transform.rotation.yaw)
+                heading_error_deg = None if route_heading_deg is None else _normalize_angle_deg(route_heading_deg - ego_yaw_deg)
+                traffic_light_state = 'NONE'
+                try:
+                    if self.hero.is_at_traffic_light():
+                        traffic_light_state = self.hero.get_traffic_light_state().name
+                except Exception:
+                    pass
+                predicted_traj = pid_debug.get('plan') or []
+                predicted_points = [
+                    (round(point[0], 2), round(point[1], 2))
+                    for point in predicted_traj
+                ]
+                local_command_xy = nav_debug.get('local_command_xy')
+                local_command_angle_deg = _local_command_angle_deg(local_command_xy)
+                pred_terminal_heading_deg = _trajectory_terminal_heading_deg(predicted_traj)
+                pred_path_length = round(_trajectory_path_length(predicted_traj), 3)
+                target_pred_angle_gap_deg = None
+                if local_command_angle_deg is not None and pred_terminal_heading_deg is not None:
+                    target_pred_angle_gap_deg = round(
+                        _normalize_angle_deg(pred_terminal_heading_deg - local_command_angle_deg),
+                        2,
+                    )
                 print(
                     f'step={step} location=({location.x:.2f}, {location.y:.2f}) '
                     f'speed={speed:.2f} remaining={remaining:.2f} '
                     f'control=({control.steer:.3f}, {control.throttle:.3f}, {control.brake:.3f}) '
+                    f'command_raw={nav_debug.get("near_command")}:{nav_debug.get("near_command_name")} '
+                    f'command_model={nav_debug.get("model_command")}:{nav_debug.get("model_command_name")} '
                     f'gps2loc={nav_debug.get("gps_to_location")} '
                     f'hero_loc={nav_debug.get("hero_location")} '
-                    f'near_node={nav_debug.get("near_node")} '
-                    f'near_cmd={nav_debug.get("near_command")} '
-                    f'local_cmd={nav_debug.get("local_command_xy")} '
+                    f'ego_yaw_deg={ego_yaw_deg:.2f} '
+                    f'route_heading_deg={None if route_heading_deg is None else round(route_heading_deg, 2)} '
+                    f'heading_error_deg={None if heading_error_deg is None else round(heading_error_deg, 2)} '
+                    f'near_node={near_node} '
+                    f'near_node_distance={near_node_distance} '
+                    f'local_cmd={local_command_xy} '
+                    f'local_cmd_angle_deg={None if local_command_angle_deg is None else round(local_command_angle_deg, 2)} '
                     f'route_len={nav_debug.get("route_len")} '
+                    f'traffic_light={traffic_light_state} '
                     f'desired_speed={pid_debug.get("desired_speed")} '
                     f'speed_ratio={pid_debug.get("speed_ratio")} '
                     f'brake_by_speed={pid_debug.get("brake_by_speed")} '
                     f'brake_by_ratio={pid_debug.get("brake_by_ratio")} '
+                    f'pred_point_count={len(predicted_traj)} '
+                    f'pred_path_length={pred_path_length} '
+                    f'pred_final_heading_deg={None if pred_terminal_heading_deg is None else round(pred_terminal_heading_deg, 2)} '
+                    f'target_pred_angle_gap_deg={target_pred_angle_gap_deg} '
+                    f'pred_traj={predicted_points} '
                     f'future_wps={future_points}',
                     flush=True,
                 )
+                hud_debug['ego_yaw_deg'] = round(ego_yaw_deg, 2)
+                hud_debug['route_heading_deg'] = None if route_heading_deg is None else round(route_heading_deg, 2)
+                hud_debug['heading_error_deg'] = None if heading_error_deg is None else round(heading_error_deg, 2)
+                hud_debug['near_node_distance'] = near_node_distance
+                hud_debug['traffic_light_state'] = traffic_light_state
+                hud_debug['local_command_angle_deg'] = None if local_command_angle_deg is None else round(local_command_angle_deg, 2)
+                hud_debug['pred_terminal_heading_deg'] = None if pred_terminal_heading_deg is None else round(pred_terminal_heading_deg, 2)
+                hud_debug['pred_path_length'] = pred_path_length
+                hud_debug['target_pred_angle_gap_deg'] = target_pred_angle_gap_deg
 
             if self.hero.get_transform().location.distance(self.destination_transform.location) <= self.args.stop_distance:
                 LOG.info('destination reached')
@@ -972,7 +1136,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--record-video', default=None, help='保存第三人称 CARLA 视角视频，例如 output/run.mp4')
     parser.add_argument('--record-video-width', type=int, default=1280)
     parser.add_argument('--record-video-height', type=int, default=720)
-    parser.add_argument('--record-video-fov', type=float, default=100.0)
+    parser.add_argument('--record-video-fov', type=float, default=110.0)
+    parser.add_argument('--record-camera-distance', type=float, default=7.5)
+    parser.add_argument('--record-camera-height', type=float, default=3.2)
+    parser.add_argument('--record-camera-pitch', type=float, default=-10.0)
 
     # 交通流
     parser.add_argument('-n', '--number-of-vehicles', type=int, default=50, help='交通流车辆数量')
