@@ -558,6 +558,7 @@ class ClosedLoopRunner:
         self.agent = padAgent(self.args.host, self.args.port)
         config_string = f'{self.args.config}+{self.args.checkpoint}+standalone'
         self.agent.setup(config_string)
+        self.agent.near_node_min_distance = self.args.near_node_distance
         self.agent.set_global_plan(gps_route, route)
         self.agent.hero_actor = self.hero
         self._setup_video_recording()
@@ -1161,8 +1162,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--sensor-wait', type=float, default=0.02)
     parser.add_argument('--warmup-ticks', type=int, default=3)
     parser.add_argument('--max-steps', type=int, default=4000)
-    parser.add_argument('--max-runtime-seconds', type=float, default=300.0)
-    parser.add_argument('--stop-distance', type=float, default=8.0)
+    parser.add_argument('--max-runtime-seconds', type=float, default=1800.0)
+    parser.add_argument('--stop-distance', type=float, default=15.0)
+    parser.add_argument('--near-node-distance', type=float, default=10.0)
     parser.add_argument('--log-every', type=int, default=20)
 
     return parser.parse_args()

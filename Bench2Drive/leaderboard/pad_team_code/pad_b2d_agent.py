@@ -76,6 +76,7 @@ class padAgent(autonomous_agent.AutonomousAgent):
         self.initialized = False
         self.latest_front_image = None
         self.latest_hud = {}
+        self.near_node_min_distance = 10.0
         cfg = Config.fromfile(self.config_path)
         if hasattr(cfg, 'plugin'):
             if cfg.plugin:
@@ -230,7 +231,7 @@ class padAgent(autonomous_agent.AutonomousAgent):
     def _init(self):
         if self.standalone_mode:
             self.lat_ref, self.lon_ref = 0, 0
-            self._route_planner = RoutePlanner(4.0, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
+            self._route_planner = RoutePlanner(self.near_node_min_distance, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
             route_world = self._global_plan_world_coord_dense if self._global_plan_world_coord_dense is not None else self._global_plan_world_coord
             self._route_planner.set_route(route_world, False)
         else:
@@ -254,7 +255,7 @@ class padAgent(autonomous_agent.AutonomousAgent):
             except Exception as e:
                 print(e, flush=True)
                 self.lat_ref, self.lon_ref = 0, 0
-            self._route_planner = RoutePlanner(4.0, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
+            self._route_planner = RoutePlanner(self.near_node_min_distance, 50.0, lat_ref=self.lat_ref, lon_ref=self.lon_ref)
             self._route_planner.set_route(self._global_plan, True)
         self.initialized = True
         self.metric_info = {}
