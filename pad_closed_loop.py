@@ -446,14 +446,22 @@ class ClosedLoopRunner:
             f'  command_onehot: {_format_sequence(hud.get("command_onehot") or [], precision=0)}',
             'OUTPUT:',
             f'  trajectory_point_count: {len(predicted_traj)}',
+            f'  use_post_processor: {hud.get("use_trajectory_post_processor")}',
             'PID OUTPUT:',
             f'  desired_speed: {hud.get("desired_speed", 0.0):.3f}',
             f'  steer: {hud.get("steer", 0.0):.3f}',
             f'  throttle: {hud.get("throttle", 0.0):.3f}',
             f'  brake: {hud.get("brake", 0.0):.3f}',
         ]
-        for idx, point in enumerate(predicted_traj):
-            overlay_lines.append(f'  p{idx}: ({float(point[0]):.3f}, {float(point[1]):.3f})')
+        trajectory_lines = []
+        for idx in range(0, len(predicted_traj), 2):
+            point = predicted_traj[idx]
+            line = f'  p{idx}: ({float(point[0]):.3f}, {float(point[1]):.3f})'
+            if idx + 1 < len(predicted_traj):
+                next_point = predicted_traj[idx + 1]
+                line += f'    p{idx + 1}: ({float(next_point[0]):.3f}, {float(next_point[1]):.3f})'
+            trajectory_lines.append(line)
+        overlay_lines.extend(trajectory_lines)
         overlay_lines.extend([
             'DEBUG:',
             f'  target_angle/pred_angle/gap: {hud.get("local_command_angle_deg")} / {hud.get("pred_terminal_heading_deg")} / {hud.get("target_pred_angle_gap_deg")}',
@@ -466,17 +474,31 @@ class ClosedLoopRunner:
         ])
         return overlay_lines
 
+    @staticmethod
+    def _compute_overlay_layout(total_lines, available_height, margin_top, margin_bottom, preferred_step, min_step):
+        usable_height = max(available_height - margin_top - margin_bottom, min_step)
+        if total_lines <= 0:
+            return preferred_step
+        return max(min_step, min(preferred_step, usable_height // total_lines))
+
     def _draw_video_overlay(self, frame: np.ndarray, hud) -> np.ndarray:
         if frame is None:
             return frame
         overlay_frame = frame.copy()
         lines = self._build_grouped_overlay_lines(hud)
         font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.55
-        thickness = 1
-        line_height = 22
         margin_x = 18
         margin_y = 28
+        line_height = self._compute_overlay_layout(
+            total_lines=len(lines),
+            available_height=overlay_frame.shape[0],
+            margin_top=margin_y,
+            margin_bottom=16,
+            preferred_step=22,
+            min_step=14,
+        )
+        font_scale = max(0.36, min(0.55, line_height / 40.0))
+        thickness = 1
         y = margin_y
         for line in lines:
             if y > overlay_frame.shape[0] - 12:
@@ -559,6 +581,7 @@ class ClosedLoopRunner:
         config_string = f'{self.args.config}+{self.args.checkpoint}+standalone'
         self.agent.setup(config_string)
         self.agent.near_node_min_distance = self.args.near_node_distance
+        self.agent.use_trajectory_post_processor = self.args.use_trajectory_post_processor
         self.agent.set_global_plan(gps_route, route)
         self.agent.hero_actor = self.hero
         self._setup_video_recording()
@@ -922,11 +945,23 @@ class ClosedLoopRunner:
                     pygame.draw.circle(self.hud_surface, (45, 45, 45), (int(center_x), int(center_y)), radius, 1)
 
             lines = self._build_grouped_overlay_lines(hud)
+            line_step = self._compute_overlay_layout(
+                total_lines=len(lines),
+                available_height=panel_rect.height,
+                margin_top=30,
+                margin_bottom=20,
+                preferred_step=28,
+                min_step=18,
+            )
+            font_size = max(14, min(22, line_step - 4))
+            panel_font = self.hud_font if font_size == 22 else pygame.font.SysFont('monospace', font_size)
             y = 30
             for line in lines:
-                text_surface = self.hud_font.render(line, True, (255, 255, 255))
+                if y > panel_rect.bottom - line_step:
+                    break
+                text_surface = panel_font.render(line, True, (255, 255, 255))
                 self.hud_surface.blit(text_surface, (1612, y))
-                y += 28
+                y += line_step
             pygame.display.flip()
         except Exception as exc:
             LOG.warning(f'HUD render failed, disabling HUD: {exc}')
@@ -1165,6 +1200,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--max-runtime-seconds', type=float, default=1800.0)
     parser.add_argument('--stop-distance', type=float, default=15.0)
     parser.add_argument('--near-node-distance', type=float, default=10.0)
+    parser.add_argument('--disable-trajectory-post-processor', action='store_false', dest='use_trajectory_post_processor', help='关闭轨迹后处理，直接将 PAD 原始输出送入 PID')
+    parser.set_defaults(use_trajectory_post_processor=True)
     parser.add_argument('--log-every', type=int, default=20)
 
     return parser.parse_args()

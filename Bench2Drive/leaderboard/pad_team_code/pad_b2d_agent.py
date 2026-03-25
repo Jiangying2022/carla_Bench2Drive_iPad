@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 from torchvision import transforms as T
 from pad_team_code.pid_controller import PIDController
+from trajectory_post_processor import compute_path_profile
 try:
     from team_code.planner import RoutePlanner
 except ModuleNotFoundError:
@@ -77,6 +78,7 @@ class padAgent(autonomous_agent.AutonomousAgent):
         self.latest_front_image = None
         self.latest_hud = {}
         self.near_node_min_distance = 10.0
+        self.use_trajectory_post_processor = True
         cfg = Config.fromfile(self.config_path)
         if hasattr(cfg, 'plugin'):
             if cfg.plugin:
@@ -521,7 +523,30 @@ class padAgent(autonomous_agent.AutonomousAgent):
 
         out_traj=output_data_batch['trajectory'].cpu().numpy()[0]
 
-        out_truck = out_traj[:,:2]
+        pad_traj_xy = out_traj[:, :2]
+
+        post_processor_input_traj = None
+        post_processed_profile = None
+        if self.use_trajectory_post_processor:
+            # PAD 输出轨迹的坐标定义为 (x, y) = (横向, 纵向)。
+            # trajectory_post_processor 的坐标定义为 (x, y) = (纵向, 横向)，
+            # 因此在 PAD -> trajectory_post_processor 之间需要显式交换两个维度。
+            post_processor_input_traj = np.stack((pad_traj_xy[:, 1], pad_traj_xy[:, 0]), axis=1)
+            post_processed_profile = compute_path_profile(post_processor_input_traj.tolist())
+
+            # trajectory_post_processor 输出的坐标定义仍然是
+            # (x, y) = (纵向, 横向)，而 PID 控制器需要的轨迹坐标定义是
+            # (x, y) = (横向, 纵向)。
+            # 因此在 trajectory_post_processor -> PID 之间需要再次显式交换两个维度。
+            out_truck = np.asarray(
+                [[point.y, point.x] for point in post_processed_profile],
+                dtype=np.float32,
+            )
+        else:
+            # 关闭轨迹后处理时，直接使用 PAD 原始输出。
+            # 这里 PAD 与 PID 的坐标定义一致，都是
+            # (x, y) = (横向, 纵向)，因此不做坐标交换。
+            out_truck = pad_traj_xy.astype(np.float32, copy=True)
 
         steer_traj, throttle_traj, brake_traj, metadata_traj = self.pidcontroller.control_pid(out_truck,
                                                                                                 tick_data['speed'],
@@ -543,6 +568,9 @@ class padAgent(autonomous_agent.AutonomousAgent):
         self.pid_metadata['steer_traj'] = float(steer_traj)
         self.pid_metadata['throttle_traj'] = float(throttle_traj)
         self.pid_metadata['brake_traj'] = float(brake_traj)
+        self.pid_metadata['use_trajectory_post_processor'] = bool(self.use_trajectory_post_processor)
+        self.pid_metadata['plan_pad_xy'] = pad_traj_xy.tolist()
+        self.pid_metadata['plan_post_processor_xy'] = None if post_processor_input_traj is None else post_processor_input_traj.tolist()
         self.pid_metadata['plan'] = out_truck.tolist()
         self.pid_metadata['command'] = command
         self.latest_hud = {
@@ -553,6 +581,9 @@ class padAgent(autonomous_agent.AutonomousAgent):
             'command_onehot': command_onehot.tolist(),
             'local_command_xy': local_command_xy.tolist(),
             'predicted_traj': out_truck.tolist(),
+            'use_trajectory_post_processor': bool(self.use_trajectory_post_processor),
+            'predicted_traj_pad_xy': pad_traj_xy.tolist(),
+            'predicted_traj_post_processor_xy': None if post_processor_input_traj is None else post_processor_input_traj.tolist(),
             'speed': float(tick_data['speed']),
             'acceleration_xy': tick_data['acceleration'][:2].tolist(),
             'steer': float(control.steer),

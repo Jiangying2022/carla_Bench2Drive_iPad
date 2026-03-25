@@ -112,7 +112,7 @@ class PadAgent(AbstractAgent):
 
     def forward(self, features: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         preds = self._pad_model(features)
-        print(f'trajectory: {preds["trajectory"]}')
+        ###print(f'trajectory: {preds["trajectory"]}')
  
         return preds
 
