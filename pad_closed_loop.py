@@ -435,8 +435,26 @@ class ClosedLoopRunner:
         array = array.reshape((image.height, image.width, 4))
         self.record_latest_frame = array[:, :, :3].copy()
 
+    def _get_route_preview_transforms(self):
+        planner_route_world = []
+        if self.agent is not None:
+            latest_hud = getattr(self.agent, 'latest_hud', {}) or {}
+            planner_route_world = latest_hud.get('planner_route_world') or []
+        if planner_route_world:
+            route_transforms = []
+            for point in planner_route_world:
+                if point is None or len(point) < 2:
+                    continue
+                location = carla.Location(x=float(point[0]), y=float(point[1]), z=0.0)
+                route_transforms.append(carla.Transform(location))
+            if route_transforms:
+                return route_transforms
+        return self.route_world_transforms
+
     def _build_grouped_overlay_lines(self, hud):
         predicted_traj = hud.get('predicted_traj') or []
+        command_xy = hud.get('local_command_xy') or []
+        near_node = hud.get('near_node') or []
         overlay_lines = [
             'INPUT:',
             f'  speed: {hud.get("speed", 0.0):.3f}',
@@ -725,7 +743,8 @@ class ClosedLoopRunner:
     def _get_forward_route_locations(self, max_distance: float = 60.0):
         if self.hero is None or not self.hero.is_alive:
             return []
-        if not self.route_world_transforms:
+        route_preview_transforms = self._get_route_preview_transforms()
+        if not route_preview_transforms:
             return []
         ego_transform = self.hero.get_transform()
         ego_location = ego_transform.location
@@ -733,8 +752,8 @@ class ClosedLoopRunner:
         best_index = self.route_preview_index
         best_distance = float('inf')
         start_search = max(0, self.route_preview_index - 20)
-        for index in range(start_search, len(self.route_world_transforms)):
-            location = self.route_world_transforms[index].location
+        for index in range(start_search, len(route_preview_transforms)):
+            location = route_preview_transforms[index].location
             dx = location.x - ego_location.x
             dy = location.y - ego_location.y
             longitudinal = dx * forward.x + dy * forward.y
@@ -749,7 +768,7 @@ class ClosedLoopRunner:
         points = []
         cumulative_distance = 0.0
         previous = ego_location
-        for transform in self.route_world_transforms[best_index:]:
+        for transform in route_preview_transforms[best_index:]:
             location = transform.location
             segment = location.distance(previous)
             cumulative_distance += segment

@@ -89,8 +89,6 @@ class AutonomousAgent(object):
         input_data = self.sensor_interface.get_data()
 
         timestamp = GameTime.get_time()
-        wallclock = GameTime.get_wallclocktime()
-        print('======[Agent] Wallclock_time = {} / Sim_time = {}'.format(wallclock, timestamp), flush=True)
 
         control = self.run_step(input_data, timestamp)
         control.manual_gear_shift = False
